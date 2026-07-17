@@ -11,6 +11,7 @@
 #define VERTICAL_HEIGHT 20   // Высота вертикальных сегментов
 #define VERTICAL_WIDTH 5     // Ширина вертикальных сегментов
 #define TAPER 3             // Величина сужения на концах
+#define BACKLIGHT_TIMEOUT_TICKS 10
 
 typedef struct {
     FuriMutex* mutex;
@@ -22,6 +23,7 @@ typedef struct {
     DateTime datetime;
     bool running;
     bool colon_state;
+    int backlight_count;
 } SegmentClock;
 
 /*
@@ -222,6 +224,14 @@ static void timer_callback(void* ctx) {
     
     // Переключаем состояние двоеточия каждую секунду
     clock->colon_state = !clock->colon_state;
+
+    if(clock->backlight_count > 0) {
+        clock->backlight_count -= 1;
+        if(clock->backlight_count == 0) {
+            notification_message(clock->notifications, &sequence_display_backlight_enforce_auto);
+            notification_message(clock->notifications, &sequence_display_backlight_off);
+        }
+    }
     
     furi_mutex_release(clock->mutex);
     view_port_update(clock->view_port);
@@ -235,6 +245,8 @@ int32_t clock_app(void* p) {
     clock->input_queue = furi_message_queue_alloc(8, sizeof(InputEvent));
     clock->running = true;
     clock->colon_state = true;  // Инициализируем состояние двоеточия
+
+    clock->backlight_count = BACKLIGHT_TIMEOUT_TICKS;
 
     // Setup view port
     clock->view_port = view_port_alloc();
@@ -263,6 +275,11 @@ int32_t clock_app(void* p) {
         if(furi_message_queue_get(clock->input_queue, &event, 100) == FuriStatusOk) {
             if(event.type == InputTypeShort && event.key == InputKeyBack) {
                 clock->running = false;
+            } else if(event.type == InputTypeShort && event.key == InputKeyOk) {
+                furi_mutex_acquire(clock->mutex, FuriWaitForever);
+                clock->backlight_count = BACKLIGHT_TIMEOUT_TICKS;
+                furi_mutex_release(clock->mutex);
+                notification_message(clock->notifications, &sequence_display_backlight_enforce_on);
             }
         }
     }
